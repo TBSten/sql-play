@@ -1,0 +1,47 @@
+{
+	"page": {
+		"prefix": "page",
+		"body": [
+			"import { createPage } from 'lib/client/page';",
+			"",
+			"type Props = {",
+			"}",
+			"const page = createPage<Props>()",
+			"",
+			"const $1 = page.component(() => {",
+			"  return (",
+			"    <>$2</>",
+			"  )",
+			"})",
+			"",
+			"export default $1",
+			"",
+			"export const getServerSideProps = page.ssr({",
+			"  get: async (ctx) => {",
+			"    return {",
+			"      props: {",
+			"      }",
+			"    }",
+			"  },",
+			"})",
+		]
+	},
+	"api": {
+		"prefix": "api",
+		"body": [
+			"",
+			"import { apiRoute } from \"lib/server/api\"",
+			"",
+			"const handler = apiRoute({",
+			"  GET: (req, res) => {",
+			"    return res.json({ ${1:msg: \"ok\"} })",
+			"  },",
+			"  onError: (req, res, err) => {",
+			"    return res.status(500).json({ msg: \"error\", err })",
+			"  },",
+			"})",
+			"export default handler",
+			""
+		]
+	},
+}

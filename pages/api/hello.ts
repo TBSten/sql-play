@@ -1,13 +1,12 @@
-// Next.js API route support: https://nextjs.org/docs/api-routes/introduction
-import type { NextApiRequest, NextApiResponse } from 'next'
 
-type Data = {
-  name: string
-}
+import { apiRoute } from "lib/server/api"
 
-export default function handler(
-  req: NextApiRequest,
-  res: NextApiResponse<Data>
-) {
-  res.status(200).json({ name: 'John Doe' })
-}
+const handler = apiRoute({
+  GET: (req, res) => {
+    return res.json({ msg: "ok" })
+  },
+  onError: (req, res, err) => {
+    return res.status(500).json({ msg: "error", err })
+  },
+})
+export default handler
