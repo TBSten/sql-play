@@ -8,10 +8,20 @@ function regexpFlg() {
     let flg = matcherConfig.noneCase ? "i" : ""
     return flg
 }
+function esc(str: string) {
+    return str.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')
+}
 
+const ignore = "\\n"
 export function toTokens(src: string, keywords: string[]): string[] {
     let flg = regexpFlg()
-    return src.split(new RegExp(`(${keywords.map(word => word + " ").join("|")})`, flg)).filter(x => x && !x.match(/^\s+$/g)).map(x => x.trim())
+    const pt = `(${keywords.map(word => esc(word)).concat(ignore).join("|")})`
+    return src.split(new RegExp(pt, flg)).filter(x => x && !x.match(/^\s+$/g)).map(x => x.trim())
+}
+
+export interface Matcher {
+    next(input: MatcherInput, output: MatcherOutput): boolean;
+    debug?: string;
 }
 
 export type MatcherInput = {
@@ -19,49 +29,61 @@ export type MatcherInput = {
     next: () => string;
     back: () => void;
     test: () => void;
+    isEmpty: () => boolean;
 }
-export interface Matcher {
-    // next(output: MatcherOutput, nextInput: () => string): boolean;
-    next(input: MatcherInput, output: MatcherOutput): boolean;
-}
+
 export class MatcherOutput {
     _buf: string[] = []
-    _captured: Record<string, string> = {}
+    _captured: Record<string, string[]> = {}
     out(value: string) {
         this._buf.push(value)
     }
-    capture(name: string, value: string) {
-        this._captured[name] = value
+    capture(name: string, ...value: string[]) {
+        if (!this._captured[name]) {
+            this._captured[name] = []
+        }
+        this._captured[name].push(...value)
+    }
+    getCapture(name: string): string[] | null {
+        return this._captured[name] ?? null
+    }
+    getOut(): string[] {
+        return this._buf
     }
 }
 
 export const is = (word: string): Matcher => {
     return {
+        debug: `"${word}"`,
         next(input: MatcherInput, output: MatcherOutput): boolean {
             const inputed = input.next()
             // const isOk = input === word
             let flg = regexpFlg()
-            const m = new RegExp(`^(${word})$`, flg).exec(inputed)
+            const m = new RegExp(`^(${esc(word)})$`, flg).exec(inputed)
             const isOk = !!m
             if (isOk) {
                 output.out(inputed)
             }
+            console.log("@@@", word, "is", inputed, new RegExp(`^(${esc(word)})$`, flg).exec(inputed) ? "yes" : "no", isOk)
             return isOk
         }
-    }
+    } as Matcher
 }
 export const any = (): Matcher => {
     return {
+        debug: "any",
         next(input: MatcherInput, output: MatcherOutput): boolean {
             const inputed = input.next()
             const ok = !!inputed && inputed.length >= 1
             if (ok) output.out(inputed)
+            console.log("@@@", inputed, "any", ok)
             return ok
         }
-    }
+    } as Matcher
 }
 export const optional = (...matchers: (string | Matcher)[]): Matcher => {
     return {
+        debug: `(${matchers.map(mat => toMatcher(mat).debug ?? "???").join(" , ")})?`,
         next(input: MatcherInput, output: MatcherOutput): boolean {
             const startCur = input.getCursor()
             const matcher = toMatcher(matchers) // group matcherになる
@@ -69,23 +91,25 @@ export const optional = (...matchers: (string | Matcher)[]): Matcher => {
             while (!ok && input.getCursor() > startCur) {
                 input.back()
             }
-            console.log("optional",);
-            input.test()
-            return ok
+            return true
         }
     }
 }
 export const opt = optional
 export const or = (...matchers: (string | Matcher)[]): Matcher => {
     return {
+        debug: `${matchers.map(mat => toMatcher(mat).debug ?? "???").join(" | ")} `,
         next(input, output): boolean {
-            // let buf: string[] = []
-            // let idx = -1
+            let ans = false
             matchers.forEach(matcher => {
+                if (ans) return
                 const startCursor = input.getCursor()
-                ans = ans || toMatcher(matcher).next(input, output)
-                while (input.getCursor() > startCursor) {
-                    input.back()
+                const res = toMatcher(matcher).next(input, output)
+                ans = ans || res
+                if (!ans) {
+                    while (input.getCursor() > startCursor) {
+                        input.back()
+                    }
                 }
             })
             return ans
@@ -94,9 +118,11 @@ export const or = (...matchers: (string | Matcher)[]): Matcher => {
 }
 export const group = (...matchers: (string | Matcher)[]): Matcher => {
     return {
+        debug: `${matchers.map(mat => toMatcher(mat).debug ?? "???").join(" ")} `,
         next(input, output): boolean {
             let flg = true
             matchers.forEach(matcher => {
+                if (!flg) return
                 flg = flg && toMatcher(matcher).next(input, output)
             })
             return flg
@@ -105,14 +131,62 @@ export const group = (...matchers: (string | Matcher)[]): Matcher => {
 }
 export const grp = group
 //capture
-export function capture(matcher: Matcher): Matcher {
+export function capture(name: string, matcher: Matcher = any()): Matcher {
     return {
-        next(output, nextInput): boolean {
-            return matcher.next(output, nextInput)
+        debug: `(<${name}>:${toMatcher(matcher).debug ?? "???"})`,
+        next(input, output): boolean {
+            const captureStart = output._buf.length
+            const ans = matcher.next(input, output)
+            const captureEnd = output._buf.length
+            const capture = output._buf.slice(captureStart, captureEnd)
+            output.capture(name, ...capture)
+            return ans
         }
     }
 }
 //repeat
+export function repeat(...matchers: (string | Matcher)[]): Matcher {
+    return {
+        debug: `(${toMatcher(matchers).debug ?? "???"})*`,
+        next(input, output): boolean {
+            if (matchers.length <= 0) return true
+            console.log("🍅🍅🍅 repeat start", input.getCursor(), toMatcher(matchers).debug);
+            input.test()
+            const _matchers = matchers.map(mat => toMatcher(mat))
+            const expect = _matchers.length
+            let whileFlg = true
+            let start = input.getCursor()
+            let idx = start
+            while (whileFlg) {
+                for (let matcher of _matchers) {
+                    whileFlg = matcher.next(input, output) && !input.isEmpty()
+                    console.log("in for loop", idx);
+                    idx++
+                    if (!whileFlg) break
+                    start = idx
+                }
+            }
+            console.log(start, idx, input.getCursor());
+            // input.back() //何回backする？
+            console.log(input.getCursor());
+            console.log("🍅🍅🍅 repeat end", input.getCursor());
+            input.test()
+            return true
+        }
+    }
+}
+// repeatRange("a","b")(0,10)  //0-10回"ab"を繰り返す
+
+// joinRepeat("a","b")(",")  // grp(("a","b"),repeat(",",grp("a","b")))) と同じ
+export const joinRepeat = (...matchers: (string | Matcher)[]) => (join: string | Matcher) => (
+    grp(toMatcher(matchers), repeat(toMatcher(join), toMatcher(matchers)))
+)
+export const debug = (name: string) => (...matchers: (string | Matcher)[]) => (
+    {
+        ...toMatcher(matchers),
+        debug: name,
+    }
+)
 
 export function toMatcher(arg: string | Matcher | (string | Matcher)[]): Matcher {
     if (typeof arg === "string") {
@@ -143,6 +217,7 @@ export function exec(
             return ans
         },
         back() {
+            console.log("back", cur, "->", cur - 1);
             cur--
         },
         getCursor() {
@@ -150,35 +225,30 @@ export function exec(
         },
         test() {
             console.log(">>>", _tokens, cur)
-        }
+        },
+        isEmpty() {
+            return cur >= _tokens.length
+        },
     }
     const output = new MatcherOutput()
-    const ok = matcher.next(input, output)
+    const ok = matcher.next(input, output) && input.isEmpty()
+    console.log("isEmpty", input.isEmpty(), cur);
     return {
         tokens: _tokens,
         ok,
+        input,
+        cur,
         output,
     }
 }
 
-// function test() {
-//     console.clear()
-//     matcherConfig.noneCase = true
-//     const pat = grp(
-//         "select", any(),
-//         "from", any(),
-//         opt("where", any()),
-//         opt("group", "by", any(),),
-//         opt("having", any(),),
-//         opt("order", "by", any()),
-//         opt("limit", any(),),
-//         opt("offset", any(),),
-//     )
-//     const res = exec(pat, "SELECT col1, col2 FROM ORDER BY XXX ASC", [
-//         "select", "from", "where", "group", "by", "order", "by", "limit", "offset"
-//     ])
-//     console.log(res);
-// }
-// test()
+
+(() => {
+    console.clear()
+    const pat = grp("a", "b", repeat("c", "d", "e", "f"), "c", "d", "x")
+    const str = "abcdefcdx"
+    const result = exec(pat, str, ["a", "b", "c", "d", "e", "f"])
+    console.log(result)
+})()
 
 

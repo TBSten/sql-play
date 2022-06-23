@@ -1,5 +1,9 @@
-import { exec, or } from "./matcher";
+import { distinct } from "lib/util";
+import { deleteKeywords, deletePattern } from "./delete";
+import { insertKeywords, insertPattern } from "./insert";
+import { capture, exec, grp, opt, or, repeat } from "./matcher";
 import { selectKeywords, selectPattern } from "./select";
+import { updateKeywords, updatePatten } from "./update";
 
 
 export interface StatementDetail {
@@ -40,18 +44,39 @@ export interface CreateTableStatementDetail extends StatementDetail {
 }
 
 
-const patterns = {
-    select: selectPattern,
+const _patterns = {
+    select: selectPattern(),
+    insert: insertPattern(),
+    update: updatePatten(),
+    delete: deletePattern(),
 }
-const keywords: Record<keyof typeof patterns, string[]> = {
+const _keywords: Record<keyof typeof _patterns, string[]> = {
     select: selectKeywords,
+    insert: insertKeywords,
+    update: updateKeywords,
+    delete: deleteKeywords,
 }
+const statementPattern = capture("<<TEST>>", or(...Object.values(_patterns)))
+
+const SEMI = ";"
+// const sqlPattern = repeat(opt(pattern), SEMI)
+const sqlPattern = grp(
+    statementPattern,
+    repeat(SEMI),
+    repeat(
+        statementPattern,
+        opt(repeat(SEMI))
+    )
+)
+// const keywords = Array.from(new Set(...Object.values(_keywords), SEMI))
+const keywords = distinct([...Object.values(_keywords).flat().map(word => word + " "), SEMI])
 
 export const analyzeSql = (sql: string): StatementDetail[] => {
     const ans: StatementDetail[] = []
     // sql -> statement[]
-    console.log("exec", sql);
-    const res = exec(or(selectPattern, "exit"), sql, selectKeywords)
+    console.log("exec", `<<${sql}>>`);
+    console.log("keywords", keywords);
+    const res = exec(sqlPattern, sql, [...keywords, "a", "b"])
     console.log(res)
     return ans
 }

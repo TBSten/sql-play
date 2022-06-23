@@ -43,3 +43,46 @@ idx     3
 input   (none)
 buf     1   2   3   4
 idx     4
+
+
+
+
+# repeat
+
+repeat(or("a","b")) において
+( (a|b)* )
+
+a b a b     => ok
+    flg     in
+    true    -
+            a
+    true    b
+            a
+    true    b
+    false   (none)
+
+a b a b X   => ok
+    flg     in
+    true    -
+            a
+            b
+    true
+            a
+            b
+    true
+    false   X
+
+a b a X     => no
+    flg     int
+    true    -
+            a
+            b
+    true
+            a
+    false   X
+
+a b a X     => no
+b a X       => no
+    flg     int
+    true    -
+    false   b
